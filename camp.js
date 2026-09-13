@@ -26,7 +26,16 @@
   }
 
   function todayIso() {
-    return new Date().toISOString().slice(0, 10);
+    // 必须取本地日期：toISOString() 是 UTC，上海凌晨会落到前一天
+    const d = new Date();
+    return localIso(d);
+  }
+
+  function localIso(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
   }
 
   function daysBetween(a, b) {
@@ -104,9 +113,15 @@
     try {
       const parsed = { ...defaultCamp(), ...JSON.parse(saved) };
       parsed.config = { ...defaultConfig(), ...(parsed.config || {}) };
-      if (!Array.isArray(parsed.config.focus) || !parsed.config.focus.length) {
+      // 数字配置类型/范围清洗，防止手工损坏的存档导致排程异常
+      if (!Number.isFinite(parsed.config.playerCount)) parsed.config.playerCount = defaultConfig().playerCount;
+      if (!Number.isFinite(parsed.config.perDay) || parsed.config.perDay < 1) parsed.config.perDay = defaultConfig().perDay;
+      if (!Number.isFinite(parsed.config.days) || parsed.config.days < 1) parsed.config.days = defaultConfig().days;
+      if (!Array.isArray(parsed.config.focus) || !parsed.config.focus.length ||
+          !parsed.config.focus.every((f) => ruleCategories.includes(f))) {
         parsed.config.focus = ["forgets", "disputes"];
       }
+      if (!isIsoDate(parsed.config.startDate)) parsed.config.startDate = defaultConfig().startDate;
       for (const key of ["plan", "sessions", "wrongs", "seen"]) {
         if (!Array.isArray(parsed[key])) parsed[key] = [];
       }
@@ -306,7 +321,8 @@
         eligibleGameIds.sort((a, b) => gameScore(b) - gameScore(a))[0];
 
       function place(type, capacity) {
-        const banned = new Set(bans[type] || []);
+        // bans 统一为 {gid,rid} 对象数组，兼容旧版纯规则 ID 字符串
+        const banned = new Set((bans[type] || []).map((b) => (typeof b === "string" ? b : b.rid)));
         let pinCursor = 0;
         const pinList = pins[type] || [];
 
@@ -591,7 +607,7 @@
       const pos = pins[type].findIndex((p) => p.rid === slot.rid);
       if (pos >= 0) pins[type].splice(pos, 1);
     }
-    bans[type].push(slot.rid);
+    bans[type].push({ gid: slot.gid, rid: slot.rid });
 
     const slotGid = slot.gid;
     const supply =
@@ -618,7 +634,7 @@
         .map((s) => s.gid)
     );
     const usedToday = new Set(day.slots.map((s) => s.rid));
-    const banned = new Set(bans[type]);
+    const banned = new Set((bans[type] || []).map((b) => (typeof b === "string" ? b : b.rid)));
     const usable = (ref) => !banned.has(ref.rid) && !usedToday.has(ref.rid) && !prevPractice.has(ref.gid);
     // 优先在同一款桌游内换题，保持当日主打游戏不变
     let pick = supply.find((ref) => ref.gid === slotGid && usable(ref)) || supply.find(usable);
@@ -711,93 +727,208 @@
     return v && typeof v === "object" && !Array.isArray(v);
   }
 
+  const isNonEmptyString = (v) => typeof v === "string" && v.trim().length > 0;
+  const isBool = (v) => typeof v === "boolean";
+  const isNum = (v) => typeof v === "number" && Number.isFinite(v);
+
+  // 严格日期：YYYY-MM-DD 且必须是真实存在的日期（拒绝 2026-02-30 等）
+  function isIsoDate(v) {
+    if (!isNonEmptyString(v) || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+    const [y, m, d] = v.split("-").map(Number);
+    const dt = new Date(`${v}T00:00:00`);
+    return !Number.isNaN(dt) && dt.getFullYear() === y && dt.getMonth() + 1 === m && dt.getDate() === d;
+  }
+
   /**
-   * 全量校验通过后才写入；任一错误都不覆盖原数据。
-   * 拦截：失效桌游/规则、重复场次、答案缺失、时间冲突。
+   * 严格结构校验：缺字段、类型错误、结构不完整、引用失效、重复/冲突都会被拦截。
+   * 只有返回空数组时才允许写入，保证任何失败都不覆盖原数据。
    */
   function validateImport(payload) {
     const errors = [];
-    if (!isObj(payload) || payload.app !== "boardgame-rule-camp" || !isObj(payload.training)) {
-      return ["文件格式不正确：缺少训练数据或不是本应用导出的文件。"];
+    if (!isObj(payload) || payload.app !== "boardgame-rule-camp") {
+      return ["文件格式不正确：不是本应用导出的训练营文件（缺少标识 app）。"];
     }
     const t = payload.training;
+    if (!isObj(t)) {
+      return ["文件结构不完整：缺少 training 数据对象。"];
+    }
 
-    const cfg = isObj(t.config) ? { ...defaultConfig(), ...t.config } : defaultConfig();
-    if (typeof cfg.playerCount !== "number" || cfg.playerCount < 1 || cfg.playerCount > 12) errors.push("配置：人数必须在 1-12 之间");
-    if (!Array.isArray(cfg.focus) || !cfg.focus.length || !cfg.focus.every((f) => ruleCategories.includes(f))) errors.push("配置：重点分类包含无效值");
-    if (typeof cfg.perDay !== "number" || cfg.perDay < 1 || cfg.perDay > 50) errors.push("配置：每日题量必须在 1-50 之间");
-    if (typeof cfg.days !== "number" || cfg.days < 1 || cfg.days > 365) errors.push("配置：可用天数必须在 1-365 之间");
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(cfg.startDate)) errors.push("配置：开始日期格式无效");
+    // ---------- 顶层键必须齐全且类型正确 ----------
+    const requiredArrays = ["plan", "sessions", "wrongs", "seen"];
+    for (const key of requiredArrays) {
+      if (!(key in t)) errors.push(`结构不完整：缺少「${key}」数组。`);
+      else if (!Array.isArray(t[key])) errors.push(`类型错误：「${key}」必须是数组。`);
+    }
+    for (const key of ["config", "mastery"]) {
+      if (!(key in t)) errors.push(`结构不完整：缺少「${key}」对象。`);
+      else if (!isObj(t[key])) errors.push(`类型错误：「${key}」必须是对象。`);
+    }
+    if ("dayOverrides" in t && !isObj(t.dayOverrides)) errors.push("类型错误：「dayOverrides」必须是对象。");
+    if ("version" in t && !isNum(t.version)) errors.push("类型错误：「version」必须是数字。");
+    if (errors.length) return [...new Set(errors)]; // 结构都不完整时，后续逐项检查没有意义
 
-    const sessions = Array.isArray(t.sessions) ? t.sessions : [];
+    // ---------- config ----------
+    const cfg = t.config;
+    if (!isObj(cfg)) {
+      errors.push("结构不完整：config 不是对象。");
+    } else {
+      for (const key of ["playerCount", "perDay", "days"]) {
+        if (!(key in cfg)) errors.push(`配置缺失：没有「${key}」字段。`);
+        else if (!isNum(cfg[key])) errors.push(`配置类型错误：「${key}」必须是数字。`);
+      }
+      if (isNum(cfg.playerCount) && !(cfg.playerCount >= 1 && cfg.playerCount <= 12)) errors.push("配置：人数必须在 1-12 之间。");
+      if (isNum(cfg.perDay) && !(cfg.perDay >= 1 && cfg.perDay <= 50)) errors.push("配置：每日题量必须在 1-50 之间。");
+      if (isNum(cfg.days) && !(cfg.days >= 1 && cfg.days <= 365)) errors.push("配置：可用天数必须在 1-365 之间。");
+      if (!("focus" in cfg)) errors.push("配置缺失：没有「focus」重点分类。");
+      else if (!Array.isArray(cfg.focus) || !cfg.focus.length || !cfg.focus.every((f) => typeof f === "string")) {
+        errors.push("配置类型错误：「focus」必须是非空字符串数组。");
+      } else if (!cfg.focus.every((f) => ruleCategories.includes(f))) {
+        errors.push("配置：重点分类包含无效值。");
+      }
+      if (!("startDate" in cfg)) errors.push("配置缺失：没有「startDate」开始日期。");
+      else if (!isIsoDate(cfg.startDate)) errors.push("配置：开始日期不是有效日期（应为 YYYY-MM-DD 且真实存在）。");
+    }
+
+    // ---------- sessions：缺数组已在前面拦截，这里逐项严格检查 ----------
     const sessionIds = new Set();
     const timestamps = [];
-    sessions.forEach((s, i) => {
+    t.sessions.forEach((s, i) => {
       const where = `场次#${i + 1}`;
-      if (!isObj(s)) return errors.push(`${where}：不是有效对象`);
-      if (!s.id) errors.push(`${where}：缺少场次 ID`);
-      else if (sessionIds.has(s.id)) errors.push(`${where}：重复场次（ID ${s.id}）`);
+      if (!isObj(s)) return errors.push(`${where}：必须是对象。`);
+      if (!isNonEmptyString(s.id)) errors.push(`${where}：缺少或无效的场次 ID。`);
+      else if (sessionIds.has(s.id)) errors.push(`${where}：重复场次（ID ${s.id}）。`);
       sessionIds.add(s.id);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(s.date)) errors.push(`${where}：训练日期无效`);
+      if (!isIsoDate(s.date)) errors.push(`${where}：训练日期缺失或不是有效日期。`);
       const ts = new Date(s.finishedAt).getTime();
-      if (Number.isNaN(ts)) errors.push(`${where}：完成时间无效`);
-      else {
-        if (timestamps.some((x) => Math.abs(ts - x) < 60000)) errors.push(`${where}：与其它场次时间冲突（完成时间间隔不足 1 分钟）`);
+      if (!isNonEmptyString(s.finishedAt) || Number.isNaN(ts)) {
+        errors.push(`${where}：完成时间 finishedAt 缺失或无法解析。`);
+      } else {
+        if (timestamps.some((x) => Math.abs(ts - x) < 60000)) {
+          errors.push(`${where}：与其它场次时间冲突（完成时间间隔不足 1 分钟）。`);
+        }
         timestamps.push(ts);
       }
-      if (!["memo", "quiz", "review"].includes(s.type)) errors.push(`${where}：训练类型无效`);
-      if (!Array.isArray(s.answers) || s.answers.length === 0) {
-        errors.push(`${where}：答案缺失（没有答题记录）`);
+      if (!["memo", "quiz", "review"].includes(s.type)) errors.push(`${where}：训练类型 type 缺失或无效。`);
+      if (!Array.isArray(s.answers)) {
+        errors.push(`${where}：答案缺失（answers 必须是数组）。`);
+      } else if (s.answers.length === 0) {
+        errors.push(`${where}：答案缺失（没有任何答题记录）。`);
       } else {
         s.answers.forEach((a, k) => {
-          if (!isObj(a) || typeof a.ok !== "boolean" || !a.gid || !a.rid) {
-            errors.push(`${where} 第${k + 1}题：答案缺失或字段不完整`);
+          const at = `${where} 第${k + 1}题`;
+          if (!isObj(a)) return errors.push(`${at}：必须是对象。`);
+          if (!isNonEmptyString(a.gid) || !isNonEmptyString(a.rid)) {
+            errors.push(`${at}：答案缺少 gid/rid 标识。`);
           } else if (!refExists(a.gid, a.rid)) {
-            errors.push(`${where} 第${k + 1}题：引用了失效桌游或已删除规则（${ruleName(a.gid, a.rid)}）`);
+            errors.push(`${at}：引用了失效桌游或已删除规则（${ruleName(a.gid, a.rid)}）。`);
+          }
+          if (!isBool(a.ok)) errors.push(`${at}：判分 ok 必须是布尔值 true/false。`);
+        });
+      }
+    });
+
+    // ---------- plan ----------
+    const planDates = new Set();
+    t.plan.forEach((d, i) => {
+      const where = `计划第${i + 1}天`;
+      if (!isObj(d)) return errors.push(`${where}：必须是对象。`);
+      if (!isIsoDate(d.date)) errors.push(`${where}：日期缺失或不是有效日期。`);
+      else if (planDates.has(d.date)) errors.push(`${where}：计划日期 ${d.date} 重复（时间冲突）。`);
+      planDates.add(d.date);
+      for (const key of ["locked", "skipped", "completed"]) {
+        if (key in d && !isBool(d[key])) errors.push(`${where}：${key} 必须是布尔值。`);
+      }
+      if (!Array.isArray(d.slots)) {
+        errors.push(`${where}：slots 必须是数组。`);
+      } else {
+        d.slots.forEach((slot, k) => {
+          const at = `${where} 第${k + 1}题`;
+          if (!isObj(slot)) return errors.push(`${at}：必须是对象。`);
+          if (!["memo", "quiz", "review"].includes(slot.type)) errors.push(`${at}：题型 type 缺失或无效。`);
+          if (!isNonEmptyString(slot.gid) || !isNonEmptyString(slot.rid)) {
+            errors.push(`${at}：缺少 gid/rid 标识。`);
+          } else if (!refExists(slot.gid, slot.rid)) {
+            errors.push(`${at}：引用了失效桌游或已删除规则（${ruleName(slot.gid, slot.rid)}）。`);
+          }
+          for (const key of ["done", "pinned", "forced"]) {
+            if (key in slot && !isBool(slot[key])) errors.push(`${at}：${key} 必须是布尔值。`);
           }
         });
       }
     });
 
-    const plan = Array.isArray(t.plan) ? t.plan : [];
-    const planDates = new Set();
-    plan.forEach((d, i) => {
-      const where = `计划第${i + 1}天`;
-      if (!isObj(d) || !/^\d{4}-\d{2}-\d{2}$/.test(d.date)) return errors.push(`${where}：日期无效`);
-      if (planDates.has(d.date)) errors.push(`${where}：计划日期 ${d.date} 重复（时间冲突）`);
-      planDates.add(d.date);
-      (d.slots || []).forEach((slot) => {
-        if (!isObj(slot) || !slot.gid || !slot.rid || !["memo", "quiz", "review"].includes(slot.type)) {
-          errors.push(`${where}：存在无效的训练题槽`);
-        } else if (!refExists(slot.gid, slot.rid)) {
-          errors.push(`${where}：题目引用了失效桌游或已删除规则（${ruleName(slot.gid, slot.rid)}）`);
-        }
-      });
-    });
-
-    const wrongs = Array.isArray(t.wrongs) ? t.wrongs : [];
-    wrongs.forEach((w, i) => {
-      if (!isObj(w) || !w.gid || !w.rid || !/^\d{4}-\d{2}-\d{2}$/.test(w.due || "")) {
-        errors.push(`错题#${i + 1}：字段不完整或日期无效`);
+    // ---------- wrongs ----------
+    t.wrongs.forEach((w, i) => {
+      const where = `错题#${i + 1}`;
+      if (!isObj(w)) return errors.push(`${where}：必须是对象。`);
+      if (!isNonEmptyString(w.id)) errors.push(`${where}：缺少错题 ID。`);
+      if (!isNonEmptyString(w.gid) || !isNonEmptyString(w.rid)) {
+        errors.push(`${where}：缺少 gid/rid 标识。`);
       } else if (!refExists(w.gid, w.rid)) {
-        errors.push(`错题#${i + 1}：引用了失效桌游或已删除规则（${ruleName(w.gid, w.rid)}）`);
+        errors.push(`${where}：引用了失效桌游或已删除规则（${ruleName(w.gid, w.rid)}）。`);
       }
+      if (!isIsoDate(w.due)) errors.push(`${where}：到期日期 due 缺失或不是有效日期。`);
+      if ("times" in w && !isNum(w.times)) errors.push(`${where}：复习次数 times 必须是数字。`);
     });
 
-    const mastery = isObj(t.mastery) ? t.mastery : {};
-    for (const [rid, m] of Object.entries(mastery)) {
-      if (!isObj(m) || !m.gid) {
-        errors.push(`掌握度记录：字段不完整`);
-      } else if (!refExists(m.gid, rid)) {
-        errors.push(`掌握度记录：引用了失效桌游或已删除规则（${ruleName(m.gid, rid)}）`);
+    // ---------- mastery ----------
+    for (const [rid, m] of Object.entries(t.mastery)) {
+      if (!isObj(m)) {
+        errors.push(`掌握度记录 ${String(rid).slice(0, 8)}：必须是对象。`);
+        continue;
+      }
+      if (!isNonEmptyString(m.gid)) errors.push(`掌握度记录 ${String(rid).slice(0, 8)}：缺少 gid。`);
+      else if (!refExists(m.gid, rid)) errors.push(`掌握度记录：引用了失效桌游或已删除规则（${ruleName(m.gid, rid)}）。`);
+      for (const key of ["level", "streak", "gameBoost"]) {
+        if (key in m && !isNum(m[key])) errors.push(`掌握度记录 ${String(rid).slice(0, 8)}：${key} 必须是数字。`);
       }
     }
 
-    const seen = Array.isArray(t.seen) ? t.seen : [];
-    seen.forEach((rid) => {
+    // ---------- seen ----------
+    t.seen.forEach((rid, i) => {
+      if (!isNonEmptyString(rid)) {
+        errors.push(`已学记录第${i + 1}项：必须是非空字符串规则 ID。`);
+        return;
+      }
       const exists = state.games.some((g) => ruleCategories.some((cat) => g[cat].some((r) => r.id === rid)));
-      if (!exists) errors.push(`已学记录：引用了已删除规则（${String(rid).slice(0, 8)}…）`);
+      if (!exists) errors.push(`已学记录：引用了已删除规则（${rid.slice(0, 8)}…）。`);
     });
+
+    // ---------- dayOverrides ----------
+    if (isObj(t.dayOverrides)) {
+      for (const [date, ov] of Object.entries(t.dayOverrides)) {
+        const where = `日程覆盖 ${date}`;
+        if (!isObj(ov)) {
+          errors.push(`${where}：必须是对象。`);
+          continue;
+        }
+        for (const key of ["skipped", "locked"]) {
+          if (key in ov && !isBool(ov[key])) errors.push(`${where}：${key} 必须是布尔值。`);
+        }
+        for (const key of ["pins", "bans"]) {
+          if (!(key in ov)) continue;
+          if (!isObj(ov[key])) {
+            errors.push(`${where}：${key} 必须是对象。`);
+            continue;
+          }
+          for (const [type, list] of Object.entries(ov[key])) {
+            if (!["memo", "quiz", "review"].includes(type)) {
+              errors.push(`${where}：${key} 含未知题型 ${type}。`);
+            }
+            if (!Array.isArray(list)) {
+              errors.push(`${where}：${key}.${type} 必须是数组。`);
+              continue;
+            }
+            list.forEach((p, k) => {
+              if (key === "bans" && typeof p === "string") return; // 兼容旧版纯规则 ID
+              if (!isObj(p) || !isNonEmptyString(p.gid) || !isNonEmptyString(p.rid)) {
+                errors.push(`${where}：${key}.${type} 第${k + 1}项缺少 gid/rid。`);
+              }
+            });
+          }
+        }
+      }
+    }
 
     return [...new Set(errors)];
   }
@@ -815,25 +946,26 @@
       }
       const errors = validateImport(payload);
       if (errors.length) {
+        const shown = errors.slice(0, 5).join("；");
         notice = {
           type: "warn",
-          text: `导入被拦截（${errors.length} 个问题），原数据未覆盖：${errors.slice(0, 3).join("；")}${errors.length > 3 ? " 等。" : "。"}`
+          text: `导入被拦截（共 ${errors.length} 个问题），原数据未改动：${shown}${errors.length > 5 ? `；等 ${errors.length} 个问题。` : "。"}`
         };
         renderNotice();
         return;
       }
-      // 全部通过：先存撤销点再原子替换
+      // 全部通过：先存撤销点再原子替换。深拷贝，避免文件对象与内存状态共享引用
       snapshot();
       const t = payload.training;
       camp = {
         version: CAMP_VERSION,
-        config: { ...defaultConfig(), ...t.config },
-        plan: t.plan,
-        sessions: t.sessions,
-        mastery: t.mastery,
-        wrongs: t.wrongs,
-        seen: t.seen,
-        dayOverrides: isObj(t.dayOverrides) ? t.dayOverrides : {}
+        config: { ...defaultConfig(), ...structuredClone(t.config) },
+        plan: structuredClone(t.plan),
+        sessions: structuredClone(t.sessions),
+        mastery: structuredClone(t.mastery),
+        wrongs: structuredClone(t.wrongs),
+        seen: structuredClone(t.seen),
+        dayOverrides: isObj(t.dayOverrides) ? structuredClone(t.dayOverrides) : {}
       };
       runner = null;
       saveCamp();

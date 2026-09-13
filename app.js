@@ -294,10 +294,18 @@ async function addGame(event) {
   notifyDataChanged();
 }
 
+function localIsoDate(date) {
+  // 本地时区日期，避免 toISOString()（UTC）在 UTC+8 凌晨落到前一天
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 function setDefaultDate() {
   const date = new Date();
   date.setMonth(date.getMonth() - 2);
-  els.lastPlayedInput.value = date.toISOString().slice(0, 10);
+  els.lastPlayedInput.value = localIsoDate(date);
 }
 
 function escapeHtml(value) {
@@ -351,7 +359,7 @@ els.detailView.addEventListener("click", (event) => {
   }
 
   if (playedButton) {
-    game.lastPlayed = new Date().toISOString().slice(0, 10);
+    game.lastPlayed = localIsoDate(new Date());
     renderAll();
     notifyDataChanged();
   }

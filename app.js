@@ -1,6 +1,15 @@
 const storageKey = "zfl18-boardgame-rule-cards";
 const today = new Date();
 
+const ruleCategories = ["forgets", "disputes", "setup", "scoring"];
+
+function makeRule(text) {
+  return { id: crypto.randomUUID(), text };
+}
+
+// 训练营模块可通过 window.appHooks.onDataChanged 感知收藏库变化
+window.appHooks = { onDataChanged: null };
+
 const defaultState = {
   selectedId: "",
   games: [
@@ -13,10 +22,10 @@ const defaultState = {
       complexity: "中",
       lastPlayed: "2025-11-20",
       cover: "",
-      forgets: ["商站建造前先确认道路或水路连接", "袋中随从抽完后不是重洗弃堆，而是从已回袋内容继续抽"],
-      disputes: ["事件顺序和玩家动作结算先后", "科技板是否能替代所有同类随从"],
-      setup: ["按人数放置货物板块", "每位玩家拿起始随从、商人和个人板"],
-      scoring: ["货物分数", "商站和市民乘区块", "金币和建筑剩余加分"]
+      forgets: ["商站建造前先确认道路或水路连接", "袋中随从抽完后不是重洗弃堆，而是从已回袋内容继续抽"].map(makeRule),
+      disputes: ["事件顺序和玩家动作结算先后", "科技板是否能替代所有同类随从"].map(makeRule),
+      setup: ["按人数放置货物板块", "每位玩家拿起始随从、商人和个人板"].map(makeRule),
+      scoring: ["货物分数", "商站和市民乘区块", "金币和建筑剩余加分"].map(makeRule)
     },
     {
       id: crypto.randomUUID(),
@@ -27,10 +36,10 @@ const defaultState = {
       complexity: "重",
       lastPlayed: "2025-08-02",
       cover: "",
-      forgets: ["联邦连接时卫星数量和能量消耗要一起核对", "研究升到顶必须拿对应科技板限制"],
-      disputes: ["被动充能是否能拒绝", "星球改造费用受哪些能力影响"],
-      setup: ["随机终局计分板和回合得分板", "按种族设置起始资源和母星"],
-      scoring: ["终局计分板", "科技轨排名", "联邦和建筑分"]
+      forgets: ["联邦连接时卫星数量和能量消耗要一起核对", "研究升到顶必须拿对应科技板限制"].map(makeRule),
+      disputes: ["被动充能是否能拒绝", "星球改造费用受哪些能力影响"].map(makeRule),
+      setup: ["随机终局计分板和回合得分板", "按种族设置起始资源和母星"].map(makeRule),
+      scoring: ["终局计分板", "科技轨排名", "联邦和建筑分"].map(makeRule)
     },
     {
       id: crypto.randomUUID(),
@@ -41,10 +50,10 @@ const defaultState = {
       complexity: "轻",
       lastPlayed: "2026-03-15",
       cover: "",
-      forgets: ["每轮结束先铺墙再补工厂展示区", "地板线扣分后清空对应砖"],
-      disputes: ["同色砖放置限制是否看整面墙", "中央区起始玩家标记是否必须拿"],
-      setup: ["按人数放工厂圆盘", "每个圆盘补4块砖"],
-      scoring: ["横竖相邻即时分", "完整行列和颜色终局加分"]
+      forgets: ["每轮结束先铺墙再补工厂展示区", "地板线扣分后清空对应砖"].map(makeRule),
+      disputes: ["同色砖放置限制是否看整面墙", "中央区起始玩家标记是否必须拿"].map(makeRule),
+      setup: ["按人数放工厂圆盘", "每个圆盘补4块砖"].map(makeRule),
+      scoring: ["横竖相邻即时分", "完整行列和颜色终局加分"].map(makeRule)
     }
   ]
 };
@@ -73,11 +82,25 @@ const els = {
   visibleCount: document.querySelector("#visibleCount")
 };
 
+function normalizeGame(game) {
+  const normalized = { cover: "", ...game };
+  for (const key of ruleCategories) {
+    normalized[key] = Array.isArray(normalized[key])
+      ? normalized[key].map((item) =>
+          typeof item === "string" ? makeRule(item) : { id: item.id || crypto.randomUUID(), text: String(item.text ?? "") }
+        )
+      : [];
+  }
+  return normalized;
+}
+
 function loadState() {
   const saved = localStorage.getItem(storageKey);
   if (!saved) return structuredClone(defaultState);
   try {
-    return { ...structuredClone(defaultState), ...JSON.parse(saved) };
+    const parsed = { ...structuredClone(defaultState), ...JSON.parse(saved) };
+    parsed.games = Array.isArray(parsed.games) ? parsed.games.map(normalizeGame) : [];
+    return parsed;
   } catch {
     return structuredClone(defaultState);
   }
@@ -87,13 +110,17 @@ function saveState() {
   localStorage.setItem(storageKey, JSON.stringify(state));
 }
 
+function notifyDataChanged() {
+  if (typeof window.appHooks?.onDataChanged === "function") window.appHooks.onDataChanged();
+}
+
 function daysSince(dateString) {
   const date = new Date(`${dateString}T00:00:00`);
   return Math.max(0, Math.floor((today - date) / 86400000));
 }
 
 function getAllRules(game) {
-  return [...game.forgets, ...game.disputes, ...game.setup, ...game.scoring];
+  return ruleCategories.flatMap((key) => game[key].map((rule) => rule.text));
 }
 
 function getFilteredGames() {
@@ -206,10 +233,10 @@ function renderRuleSection(title, key, items) {
         ${
           items
             .map(
-              (item, index) => `
+              (item) => `
                 <li>
-                  <span>${escapeHtml(item)}</span>
-                  <button type="button" title="删除" data-rule-key="${key}" data-rule-index="${index}">×</button>
+                  <span>${escapeHtml(item.text)}</span>
+                  <button type="button" title="删除" data-rule-key="${key}" data-rule-id="${item.id}">×</button>
                 </li>
               `
             )
@@ -254,16 +281,17 @@ async function addGame(event) {
     complexity: els.complexityInput.value,
     lastPlayed: els.lastPlayedInput.value,
     cover,
-    forgets: ["本局开始前先补充容易忘的规则。"],
+    forgets: [makeRule("本局开始前先补充容易忘的规则。")],
     disputes: [],
-    setup: ["整理组件并按人数调整初始设置。"],
-    scoring: ["确认终局计分项和即时得分项。"]
+    setup: [makeRule("整理组件并按人数调整初始设置。")],
+    scoring: [makeRule("确认终局计分项和即时得分项。")]
   };
   state.games.unshift(game);
   state.selectedId = game.id;
   els.gameForm.reset();
   setDefaultDate();
   renderAll();
+  notifyDataChanged();
 }
 
 function setDefaultDate() {
@@ -302,8 +330,9 @@ els.detailView.addEventListener("submit", (event) => {
   const key = document.querySelector("#ruleTypeInput").value;
   const text = document.querySelector("#ruleTextInput").value.trim();
   if (!text) return;
-  game[key].push(text);
+  game[key].push(makeRule(text));
   renderAll();
+  notifyDataChanged();
 });
 
 els.detailView.addEventListener("click", (event) => {
@@ -315,20 +344,23 @@ els.detailView.addEventListener("click", (event) => {
 
   if (ruleButton) {
     const key = ruleButton.dataset.ruleKey;
-    const index = Number(ruleButton.dataset.ruleIndex);
-    game[key].splice(index, 1);
+    const ruleId = ruleButton.dataset.ruleId;
+    game[key] = game[key].filter((rule) => rule.id !== ruleId);
     renderAll();
+    notifyDataChanged();
   }
 
   if (playedButton) {
     game.lastPlayed = new Date().toISOString().slice(0, 10);
     renderAll();
+    notifyDataChanged();
   }
 
   if (deleteButton) {
     state.games = state.games.filter((item) => item.id !== game.id);
     state.selectedId = state.games[0]?.id || "";
     renderAll();
+    notifyDataChanged();
   }
 });
 

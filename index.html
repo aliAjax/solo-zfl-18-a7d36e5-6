@@ -3,15 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>桌游规则遗忘点卡片库</title>
+    <title>桌游规则记忆训练营</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <main class="shell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">聚会前快速复习</p>
-          <h1>桌游规则遗忘点卡片库</h1>
+          <p class="eyebrow">聚会前快速复习 · 记忆训练营</p>
+          <h1>桌游规则记忆训练营</h1>
         </div>
         <div class="summary">
           <div>
@@ -29,98 +29,170 @@
         </div>
       </header>
 
-      <section class="controls">
-        <label>
-          搜索
-          <input id="searchInput" type="search" placeholder="游戏名或规则关键词" />
-        </label>
-        <label>
-          人数
-          <select id="playerFilter">
-            <option value="all">全部</option>
-            <option value="2">适合2人</option>
-            <option value="3">适合3人</option>
-            <option value="4">适合4人</option>
-            <option value="5">适合5人</option>
-          </select>
-        </label>
-        <label>
-          复杂度
-          <select id="complexityFilter">
-            <option value="all">全部</option>
-            <option value="轻">轻</option>
-            <option value="中">中</option>
-            <option value="重">重</option>
-          </select>
-        </label>
-        <label>
-          排序
-          <select id="sortMode">
-            <option value="stale">最近未玩</option>
-            <option value="name">名称</option>
-            <option value="complexity">复杂度</option>
-          </select>
-        </label>
-      </section>
+      <nav class="tabs" role="tablist">
+        <button type="button" id="libraryTab" class="tab active" role="tab">卡片库</button>
+        <button type="button" id="campTab" class="tab" role="tab">规则记忆训练营</button>
+      </nav>
 
-      <section class="layout">
-        <aside class="panel">
-          <h2>新增桌游</h2>
-          <form id="gameForm" class="game-form">
-            <label>
-              名称
-              <input id="nameInput" required placeholder="例：勃艮第城堡" />
-            </label>
-            <div class="split">
-              <label>
-                最少人数
-                <input id="minPlayersInput" type="number" min="1" max="12" value="2" required />
-              </label>
-              <label>
-                最多人数
-                <input id="maxPlayersInput" type="number" min="1" max="12" value="4" required />
-              </label>
-            </div>
-            <div class="split">
-              <label>
-                时长分钟
-                <input id="durationInput" type="number" min="5" value="90" required />
-              </label>
-              <label>
-                复杂度
-                <select id="complexityInput">
-                  <option value="轻">轻</option>
-                  <option value="中" selected>中</option>
-                  <option value="重">重</option>
-                </select>
-              </label>
-            </div>
-            <label>
-              上次游玩
-              <input id="lastPlayedInput" type="date" required />
-            </label>
-            <label>
-              封面图
-              <input id="coverInput" type="file" accept="image/*" />
-            </label>
-            <button class="primary" type="submit">加入收藏</button>
-          </form>
-        </aside>
-
-        <section class="panel list-panel">
-          <div class="panel-head">
-            <h2>收藏列表</h2>
-            <span id="visibleCount"></span>
-          </div>
-          <div id="gameList" class="game-list"></div>
+      <!-- 卡片库视图 -->
+      <div id="libraryView">
+        <section class="controls">
+          <label>
+            搜索
+            <input id="searchInput" type="search" placeholder="游戏名或规则关键词" />
+          </label>
+          <label>
+            人数
+            <select id="playerFilter">
+              <option value="all">全部</option>
+              <option value="2">适合2人</option>
+              <option value="3">适合3人</option>
+              <option value="4">适合4人</option>
+              <option value="5">适合5人</option>
+            </select>
+          </label>
+          <label>
+            复杂度
+            <select id="complexityFilter">
+              <option value="all">全部</option>
+              <option value="轻">轻</option>
+              <option value="中">中</option>
+              <option value="重">重</option>
+            </select>
+          </label>
+          <label>
+            排序
+            <select id="sortMode">
+              <option value="stale">最近未玩</option>
+              <option value="name">名称</option>
+              <option value="complexity">复杂度</option>
+            </select>
+          </label>
         </section>
 
-        <aside class="panel detail-panel">
-          <div id="detailView"></div>
-        </aside>
-      </section>
+        <section class="layout">
+          <aside class="panel">
+            <h2>新增桌游</h2>
+            <form id="gameForm" class="game-form">
+              <label>
+                名称
+                <input id="nameInput" required placeholder="例：勃艮第城堡" />
+              </label>
+              <div class="split">
+                <label>
+                  最少人数
+                  <input id="minPlayersInput" type="number" min="1" max="12" value="2" required />
+                </label>
+                <label>
+                  最多人数
+                  <input id="maxPlayersInput" type="number" min="1" max="12" value="4" required />
+                </label>
+              </div>
+              <div class="split">
+                <label>
+                  时长分钟
+                  <input id="durationInput" type="number" min="5" value="90" required />
+                </label>
+                <label>
+                  复杂度
+                  <select id="complexityInput">
+                    <option value="轻">轻</option>
+                    <option value="中" selected>中</option>
+                    <option value="重">重</option>
+                  </select>
+                </label>
+              </div>
+              <label>
+                上次游玩
+                <input id="lastPlayedInput" type="date" required />
+              </label>
+              <label>
+                封面图
+                <input id="coverInput" type="file" accept="image/*" />
+              </label>
+              <button class="primary" type="submit">加入收藏</button>
+            </form>
+          </aside>
+
+          <section class="panel list-panel">
+            <div class="panel-head">
+              <h2>收藏列表</h2>
+              <span id="visibleCount"></span>
+            </div>
+            <div id="gameList" class="game-list"></div>
+          </section>
+
+          <aside class="panel detail-panel">
+            <div id="detailView"></div>
+          </aside>
+        </section>
+      </div>
+
+      <!-- 训练营视图 -->
+      <div id="campView" hidden>
+        <section class="panel camp-config">
+          <div class="panel-head">
+            <h2>训练计划设置</h2>
+            <span>按收藏、人数、重点分类和可用天数自动排程</span>
+          </div>
+          <div class="config-grid">
+            <label>
+              聚会人数
+              <input id="playerCountInput" type="number" min="1" max="12" value="3" />
+            </label>
+            <label>
+              每日题量
+              <input id="perDayInput" type="number" min="1" max="50" value="4" />
+            </label>
+            <label>
+              可用天数
+              <input id="daysInput" type="number" min="1" max="365" value="7" />
+            </label>
+            <label>
+              开始日期
+              <input id="startDateInput" type="date" />
+            </label>
+            <fieldset class="focus-set">
+              <legend>重点分类</legend>
+              <label class="check"><input type="checkbox" class="focus-check" value="forgets" checked />容易忘</label>
+              <label class="check"><input type="checkbox" class="focus-check" value="disputes" checked />常见争议</label>
+              <label class="check"><input type="checkbox" class="focus-check" value="setup" />开局准备</label>
+              <label class="check"><input type="checkbox" class="focus-check" value="scoring" />计分提醒</label>
+            </fieldset>
+          </div>
+          <div class="camp-toolbar">
+            <button type="button" class="primary" id="buildPlanBtn">生成 / 重排计划</button>
+            <button type="button" id="undoBtn" disabled>撤销上一步</button>
+            <button type="button" id="exportBtn">导出数据</button>
+            <button type="button" id="importBtn">导入数据</button>
+            <input type="file" id="importFile" accept="application/json,.json" hidden />
+          </div>
+          <div id="campNotice" class="notice" hidden></div>
+        </section>
+
+        <section class="camp-stats" id="campStats"></section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>每日计划</h2>
+            <span>速记 → 问答 → 纠错 → 休息；答错提权、连对降级、同款不连用</span>
+          </div>
+          <div id="planBoard" class="plan-board"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>错题本</h2>
+            <span>错题 3 天内至少复习 2 次</span>
+          </div>
+          <div id="wrongBook"></div>
+        </section>
+      </div>
     </main>
 
+    <div id="runnerHost"></div>
+
     <script src="app.js"></script>
+    <script src="camp.js"></script>
   </body>
 </html>

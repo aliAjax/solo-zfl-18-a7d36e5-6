@@ -748,23 +748,25 @@
     if (!isObj(payload) || payload.app !== "boardgame-rule-camp") {
       return ["文件格式不正确：不是本应用导出的训练营文件（缺少标识 app）。"];
     }
+    // 导出契约：version 是必需字段
+    if (!("version" in payload)) errors.push("结构不完整：缺少顶层字段「version」。");
+    else if (!isNum(payload.version)) errors.push("类型错误：顶层字段「version」必须是数字。");
+
     const t = payload.training;
     if (!isObj(t)) {
       return ["文件结构不完整：缺少 training 数据对象。"];
     }
 
-    // ---------- 顶层键必须齐全且类型正确 ----------
+    // ---------- training 必需键：逐项核对，缺失即报字段名 ----------
     const requiredArrays = ["plan", "sessions", "wrongs", "seen"];
     for (const key of requiredArrays) {
       if (!(key in t)) errors.push(`结构不完整：缺少「${key}」数组。`);
       else if (!Array.isArray(t[key])) errors.push(`类型错误：「${key}」必须是数组。`);
     }
-    for (const key of ["config", "mastery"]) {
+    for (const key of ["config", "mastery", "dayOverrides"]) {
       if (!(key in t)) errors.push(`结构不完整：缺少「${key}」对象。`);
       else if (!isObj(t[key])) errors.push(`类型错误：「${key}」必须是对象。`);
     }
-    if ("dayOverrides" in t && !isObj(t.dayOverrides)) errors.push("类型错误：「dayOverrides」必须是对象。");
-    if ("version" in t && !isNum(t.version)) errors.push("类型错误：「version」必须是数字。");
     if (errors.length) return [...new Set(errors)]; // 结构都不完整时，后续逐项检查没有意义
 
     // ---------- config ----------

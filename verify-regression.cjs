@@ -162,6 +162,36 @@ const SHANGHAI_WEE_HOURS = "2026-09-13T16:30:00Z";
   cfgString.training.config.perDay = "四";
   await tryImport(cfgString, "类型错误-perDay非数字", "数字");
 
+  // h) 缺少 dayOverrides（导出契约必需字段，缺失必须拦截且不覆盖）
+  const noDayOverrides = JSON.parse(JSON.stringify(goodPayload));
+  delete noDayOverrides.training.dayOverrides;
+  await tryImport(noDayOverrides, "缺字段-无dayOverrides", "dayOverrides");
+
+  // i) dayOverrides 类型错误（写成数组）
+  const badDayOverrides = JSON.parse(JSON.stringify(goodPayload));
+  badDayOverrides.training.dayOverrides = [];
+  await tryImport(badDayOverrides, "类型错误-dayOverrides非对象", "dayOverrides");
+
+  // j) 缺少顶层 version
+  const noVersion = JSON.parse(JSON.stringify(goodPayload));
+  delete noVersion.version;
+  await tryImport(noVersion, "缺字段-无version", "version");
+
+  // k) 失效引用：答案指向已删除规则
+  const dangling = JSON.parse(JSON.stringify(goodPayload));
+  dangling.training.sessions[0].answers[0].rid = "deleted-rule-id";
+  await tryImport(dangling, "失效引用-已删除规则", "失效");
+
+  // l) 重复场次：复制同 id 场次
+  const dupSession = JSON.parse(JSON.stringify(goodPayload));
+  dupSession.training.sessions.push({ ...dupSession.training.sessions[0], finishedAt: "2026-09-15T01:00:00+08:00" });
+  await tryImport(dupSession, "重复场次-相同id", "重复场次");
+
+  // m) 时间冲突：不同 id 但 finishedAt 相同
+  const clash = JSON.parse(JSON.stringify(goodPayload));
+  clash.training.sessions.push({ ...clash.training.sessions[0], id: "sess-2" });
+  await tryImport(clash, "时间冲突-完成时间相同", "时间冲突");
+
   // 全部失败后原数据不变
   const snapshotAfter = await page.evaluate(() => localStorage.getItem("zfl18-camp"));
   check("反例导入：原数据完全未被覆盖", snapshotBefore === snapshotAfter);
